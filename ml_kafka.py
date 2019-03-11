@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-#spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.11:2.4.0 ml_kafka.py
+# In[ ]:
+
 
 import pyspark
 from pyspark import SQLContext
@@ -10,14 +11,25 @@ from pyspark.sql import functions as F
 from pyspark.sql import udf
 from datetime import datetime, timedelta
 
+
+# In[ ]:
+
+
 import numpy as np
+from scipy import stats
+import matplotlib.pyplot as plt
+import matplotlib.font_manager
 from pyod.models.abod import ABOD
 from pyod.models.knn import KNN
 from elasticsearch import Elasticsearch
 from elasticsearch_dsl import Search
 import pandas as pd
+from sklearn import datasets, linear_model
+from sklearn.model_selection import train_test_split
+from matplotlib import pyplot as plt
+import ipaddress
 import socket, struct
-from pyod.utils.data import get_outliers_inliers
+from pyod.utils.data import generate_data, get_outliers_inliers
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.clustering import KMeans
 from pyspark.ml import Pipeline
@@ -25,11 +37,17 @@ from pyspark.ml.classification import RandomForestClassifier
 from pyspark.ml.feature import IndexToString, StringIndexer, VectorIndexer
 
 
-sc = pyspark.SparkContext(appName="ml_kafka")
-sc.setLogLevel("ERROR")
+# In[ ]:
+
+
+sc = pyspark.SparkContext(appName="threatsettesting")
 spark = SQLContext(sc)
 
 es = Elasticsearch(hosts="10.8.0.3")
+
+
+# In[ ]:
+
 
 def train_dt_model():# decision tree with pipeline
 
@@ -53,6 +71,10 @@ def train_dt_model():# decision tree with pipeline
     dt_model = pipeline.fit(trainingData)
     return dt_model
 
+
+# In[ ]:
+
+
 def ip2long(ip):
     """
     Convert an IP string to long
@@ -60,8 +82,16 @@ def ip2long(ip):
     packedIP = socket.inet_aton(ip)
     return struct.unpack("!L", packedIP)[0]
 
+
+# In[ ]:
+
+
 def long2ip(ip):
     return socket.inet_ntoa(struct.pack('!L', ip))
+
+
+# In[ ]:
+
 
 def get_training_data():
     # get es data
@@ -101,7 +131,13 @@ def get_training_data():
     vecAssembler = VectorAssembler(inputCols=["source_ip", "source_port", "dest_ip", "dest_port"], outputCol="features")
     train_features_df = vecAssembler.transform(train_features_df)
 
+    train_features_df.show()
+    train_labels_df.show()
     return train_features, train_labels, train_features_df, train_labels_df
+
+
+# In[ ]:
+
 
 def get_outliers(train_features, train_labels):
     # outlier detection
@@ -109,12 +145,20 @@ def get_outliers(train_features, train_labels):
     for i in x_outliers[0:10]:
         print("src_ip: {srcip}, src_port: {srcport}, dst_ip: {dstip}, dst_port: {dstport}".format(srcip=long2ip(i[0]), srcport=i[1], dstip=long2ip(i[2]), dstport=i[3]))    
 
+
+# In[ ]:
+
+
 # kmeans clustering unsupervised
 def get_kmeans_model(train_features_df):
     kmeans = KMeans(k=10, seed=1)
     kmeans_model = kmeans.fit(train_features_df.select('features'))
 
     return kmeans_model
+
+
+# In[ ]:
+
 
 # random forest classifier
 def get_rf_model(train_features_df):
@@ -125,7 +169,7 @@ def get_rf_model(train_features_df):
 
     # Automatically identify categorical features, and index them.
     # Set maxCategories so features with > 4 distinct values are treated as continuous.
-    featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=4).fit(train_features_df)
+    featureIndexer =        VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=4).fit(train_features_df)
 
     # Split the data into training and test sets (30% held out for testing)
     (trainingData, testData) = train_features_df.randomSplit([0.7, 0.3])
@@ -143,6 +187,10 @@ def get_rf_model(train_features_df):
     # Train model.  This also runs the indexers.
     rf_model = pipeline.fit(trainingData)
     return rf_model
+
+
+# In[ ]:
+
 
 def get_live_data():
     # pull live data set from es
@@ -169,6 +217,10 @@ def get_live_data():
     data_df = vecAssembler.transform(data_df)
     return(data_df)
 
+
+# In[ ]:
+
+
 def ip2long(ip):
     """
     Convert an IP string to long
@@ -178,11 +230,19 @@ def ip2long(ip):
         return struct.unpack("!L", packedIP)[0]
 ip2long_udf = F.udf(ip2long, LongType())
 
+
+# In[ ]:
+
+
 def normalize_ips(df):
     df = df    .withColumn('source_ip', F.col('data.json.src_ip'))    .withColumn('dest_ip', F.col('data.json.dest_ip'))    .withColumn('source_ip', F.col('data.client_ip'))    .withColumn('dest_ip', F.col('data.ip'))    .withColumn('dest_ip', F.col('data.dest.ip'))    .withColumn('source_ip', F.col('data.source.ip'))    .withColumn('dest_port', F.col('data.dest.port'))    .withColumn('source_port', F.col('data.source.port'))    .filter('source_ip is not NULL')    .filter('dest_ip is not NULL')    .filter('source_port is not NULL')    .filter('dest_port is not NULL')
     df = df.withColumn('source_ip', ip2long_udf(F.col('source_ip'))).withColumn('dest_ip', ip2long_udf(F.col('dest_ip')))
     
     return(df)
+
+
+# In[ ]:
+
 
 def process_batch(df, epoch_id):
     df = normalize_ips(df)
@@ -192,10 +252,15 @@ def process_batch(df, epoch_id):
     print(df)
     try:
         for model in models:
-            model.transform(df).groupBy('source_ip','source_port','dest_ip','dest_port','prediction').count().orderBy('count', ascending=False).show()
+            model_result = model.transform(df)
+            ds = model_result               .selectExpr("CAST('key' AS STRING)", "to_json(struct(*)) AS value")               .write               .format("kafka")               .option("kafka.bootstrap.servers", "10.8.0.8:9092")               .option("topic", "model_predictions")               .save()
     except Exception as e:
-        #print(e)
+        print(e)
         pass
+
+
+# In[ ]:
+
 
 def train_models(ml_df_training):
     # kmeans
@@ -204,6 +269,10 @@ def train_models(ml_df_training):
     rf_model = get_rf_model(ml_df_training)
     models = [kmeans_model, rf_model]
     return models
+
+
+# In[ ]:
+
 
 # get training data
 train_features, train_labels, train_features_df, train_labels_df = get_training_data()
@@ -215,7 +284,11 @@ models = train_models(ml_df_training)
 #ml_df_live = get_live_data().withColumn('label', F.when(F.col('dest_port') == 9200, 1).when(F.col('source_port') == 5600, 1).otherwise(0))
 #get_outliers(train_features, train_labels)
 
-df = spark.readStream.format("kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option("kafkaConsumer.pollTimeoutMs", 1500).option("subscribe", "logs").load()
+
+# In[ ]:
+
+
+df = spark.readStream.format("kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option("kafkaConsumer.pollTimeoutMs", 1000).option("subscribe", "logs").load()
 
 df = df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
 
@@ -236,3 +309,16 @@ schema = StructType()         .add("@timestamp", StringType())         .add("byt
 # apply json schema 
 df = df.select(F.col("key").cast("string"), F.from_json(F.col("value").cast("string"), schema).alias('data'))
 df.writeStream.foreachBatch(process_batch).start().awaitTermination()
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
+
