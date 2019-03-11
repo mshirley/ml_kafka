@@ -215,7 +215,7 @@ models = train_models(ml_df_training)
 #ml_df_live = get_live_data().withColumn('label', F.when(F.col('dest_port') == 9200, 1).when(F.col('source_port') == 5600, 1).otherwise(0))
 #get_outliers(train_features, train_labels)
 
-df = spark.readStream.format("kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option("kafkaConsumer.pollTimeoutMs", 1000).option("subscribe", "logs").load()
+df = spark.readStream.format("kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option("kafkaConsumer.pollTimeoutMs", 1500).option("subscribe", "logs").load()
 
 df = df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
 
