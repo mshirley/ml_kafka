@@ -25,6 +25,7 @@ from pyspark.ml.classification import RandomForestClassifier
 from pyspark.ml.feature import IndexToString, StringIndexer, VectorIndexer
 
 sc = pyspark.SparkContext(appName="ml_kafka")
+sc.setLogLevel("ERROR")
 spark = SQLContext(sc)
 
 es = Elasticsearch(hosts="10.8.0.3")
@@ -202,8 +203,8 @@ def process_batch(df, epoch_id):
     if epoch_id % 10 == 0:
         try:
             print('loading models')
-            kmeans_model.load('kmeans_model')
-            rf_model.load('rf_model')
+            KMeans.load('kmeans_model')
+            RandomForestClassifier.load('rf_model')
         except Exception as e:
             print('unable to load modules, {}'.format(e))
     df = normalize_ips(df)
@@ -251,7 +252,7 @@ scheduler = BackgroundScheduler()
 scheduler.start()
 scheduler.add_job(periodic_task, "interval", minutes=5)
 
-df = spark.readStream.format("kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option("kafkaConsumer.pollTimeoutMs", 1000).option("subscribe", "logs").load()
+df = spark.readStream.format("kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option("kafkaConsumer.pollTimeoutMs", 5000).option("subscribe", "logs").load()
 
 df = df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
 
