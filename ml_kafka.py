@@ -19,8 +19,8 @@ from sklearn.model_selection import train_test_split
 import socket, struct
 from pyod.utils.data import generate_data, get_outliers_inliers
 from pyspark.ml.feature import VectorAssembler
-from pyspark.ml.clustering import KMeans
-from pyspark.ml import Pipeline
+from pyspark.ml.clustering import KMeans, KMeansModel
+from pyspark.ml import Pipeline, PipelineModel
 from pyspark.ml.classification import RandomForestClassifier
 from pyspark.ml.feature import IndexToString, StringIndexer, VectorIndexer
 
@@ -90,8 +90,8 @@ def get_training_data():
     vecAssembler = VectorAssembler(inputCols=["source_ip", "source_port", "dest_ip", "dest_port"], outputCol="features")
     train_features_df = vecAssembler.transform(train_features_df)
 
-    train_features_df.show()
-    train_labels_df.show()
+    #train_features_df.show()
+    #train_labels_df.show()
     return train_features, train_labels, train_features_df, train_labels_df
 
 def get_outliers(train_features, train_labels):
@@ -203,22 +203,22 @@ def process_batch(df, epoch_id):
     if epoch_id % 10 == 0:
         try:
             print('loading models')
-            KMeans.load('kmeans_model')
-            RandomForestClassifier.load('rf_model')
+            KMeansModel.load('kmeans_model')
+            PipelineModel.load('rf_model')
         except Exception as e:
             print('unable to load modules, {}'.format(e))
     df = normalize_ips(df)
-    df.show()
+    #df.show()
     columns = ["source_ip", "source_port", "dest_ip", "dest_port"]
     vecAssembler = VectorAssembler(inputCols=columns, outputCol="features")
     df = vecAssembler.transform(df)
-    print(df)
+    #print(df)
     kmeans_model_result = kmeans_model.transform(df).withColumn('algo', F.lit('kmeans'))
-    kmeans_model_result.show()
+    #kmeans_model_result.show()
     ds = kmeans_model_result.selectExpr("CAST('key' AS STRING)", "to_json(struct(*)) AS value").write.format("kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option("topic", "model_predictions").save()
 
     rf_model_result = rf_model.transform(df).withColumn('algo', F.lit('rf'))
-    rf_model_result.show()
+    #rf_model_result.show()
     ds = rf_model_result.selectExpr("CAST('key' AS STRING)", "to_json(struct(*)) AS value").write.format("kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option("topic", "model_predictions").save()
 
 def periodic_task():
