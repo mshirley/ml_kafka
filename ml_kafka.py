@@ -200,11 +200,11 @@ def normalize_ips(df):
 
 def process_batch(df, epoch_id):
     print(epoch_id)
-    if epoch_id % 10 == 0:
+    if epoch_id % 100 == 0:
         try:
             print('loading models')
-            KMeansModel.load('kmeans_model')
-            PipelineModel.load('rf_model')
+            KMeansModel.load('hdfs://10.8.0.11:9000/data/models/kmeans_model')
+            PipelineModel.load('hdfs://10.8.0.11:9000/data/models/rf_model')
         except Exception as e:
             print('unable to load modules, {}'.format(e))
     df = normalize_ips(df)
@@ -227,9 +227,9 @@ def periodic_task():
     print('done')
     print('training models and saving to disk')
     kmeans_model = get_kmeans_model(ml_df_training)
-    kmeans_model.write().overwrite().save('kmeans_model')
+    kmeans_model.write().overwrite().save('hdfs://10.8.0.11:9000/data/models/kmeans_model')
     rf_model = get_rf_model(ml_df_training)
-    rf_model.write().overwrite().save('rf_model')
+    rf_model.write().overwrite().save('hdfs://10.8.0.11:9000/data/models/rf_model')
     print('done')
 
 ## get training data
@@ -240,9 +240,9 @@ ml_df_training = train_features_df.withColumn('label', F.when(F.col('dest_port')
 
 print('training initial models and saving to disk')
 kmeans_model = get_kmeans_model(ml_df_training)
-kmeans_model.write().overwrite().save('kmeans_model')
+kmeans_model.write().overwrite().save('hdfs://10.8.0.11:9000/data/models/kmeans_model')
 rf_model = get_rf_model(ml_df_training)
-rf_model.write().overwrite().save('rf_model')
+rf_model.write().overwrite().save('hdfs://10.8.0.11:9000/data/models/rf_model')
 print('done')
 
 #ml_df_live = get_live_data().withColumn('label', F.when(F.col('dest_port') == 9200, 1).when(F.col('source_port') == 5600, 1).otherwise(0))
