@@ -25,7 +25,7 @@ from pyspark.ml.classification import RandomForestClassifier
 from pyspark.ml.feature import IndexToString, StringIndexer, VectorIndexer
 
 sc = pyspark.SparkContext(appName="ml_kafka")
-sc.setLogLevel("ERROR")
+sc.setLogLevel("WARN")
 spark = SQLContext(sc)
 
 es = Elasticsearch(hosts="10.8.0.3")
@@ -252,7 +252,7 @@ scheduler = BackgroundScheduler()
 scheduler.start()
 scheduler.add_job(periodic_task, "interval", minutes=5)
 
-df = spark.readStream.format("kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option("kafkaConsumer.pollTimeoutMs", 5000).option("subscribe", "logs").load()
+df = spark.readStream.format("kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option("kafkaConsumer.pollTimeoutMs", 10000).option("subscribe", "logs").load()
 
 df = df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
 
