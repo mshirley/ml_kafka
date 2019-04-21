@@ -1,0 +1,39 @@
+{% extends 'bootstrap/base.html' %}
+
+<!-- Navigation Bar -->
+{% block navbar %}
+	<nav class="navbar navbar-default" role="navigation">
+		<div class="container">
+			<div class="navbar-header">
+				<a class="navbar-brand" href="#">Predictions</a>
+			</div>
+		</div>
+	</nav>
+{% endblock %}
+
+<!-- Content -->
+{% block content %}
+	<div class="container">
+		<div class="header"><h1>Predictions</h1></div>
+		<hr />
+
+		<!-- Table -->
+		<table class="table table-hover">
+			<tr>
+				<th>source_ip</th>
+				<th>source_port</th>
+				<th>dest_ip</th>
+				<th>dest_port</th>
+			</tr>
+			{% for _, row in live_data.iterrows() %}
+				<tr>
+                    <td>{{ row['source_ip'] }}</td>
+					<td>{{ row['source_port'] }}</td>
+					<td>{{ row['dest_ip'] }}</td>
+					<td>{{ row['dest_port'] }}</td>
+					<td><button type="button" class="btn btn-success">Success</button></td>
+				</tr>
+			{% endfor %}
+		</table>
+	</div>
+{% endblock %}
