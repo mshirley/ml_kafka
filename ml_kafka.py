@@ -292,8 +292,11 @@ train_features, train_labels, train_features_df, train_labels_df = get_training_
 
 # create new dataframe for ml including labeling
 ml_df_training = train_features_df.withColumn('label',
-                                              F.when(F.col('dest_port') == 9200, 1).when(F.col('source_port') == 5600,
-                                                                                         1).otherwise(0))
+                                              F.when(F.col('dest_port') == 9200, 1)
+                                              .when(F.col('source_port') == 9200, 1)
+                                              .when(F.col('dest_port') == 5601, 1)
+                                              .when(F.col('source_port') == 5601, 1)
+                                              .otherwise(0))
 
 print('training initial models and saving to disk')
 kmeans_model = get_kmeans_model(ml_df_training)
