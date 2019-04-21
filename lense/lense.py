@@ -27,9 +27,9 @@ def ip2long(ip):
 def get_live_data():
     # pull live data set from es
     es = Elasticsearch(hosts="10.8.0.16")
-    #s = Search(using=es, index="*").filter("term", type="flow").filter('range',
-    #                                                                   **{'@timestamp': {'gte': 'now-1m', 'lt': 'now'}})
-    s = Search(using=es, index="model_predictions*").filter('range', **{'@timestamp': {'gte': 'now-5m', 'lt': 'now'}})
+    s = Search(using=es, index="*").filter("term", type="flow").filter('range',
+                                                                       **{'@timestamp': {'gte': 'now-1m', 'lt': 'now'}})
+
     # s.aggs.bucket('by_timestamp', 'terms', field='@timestamp', size=999999999).metric('total_net_bytes', 'sum', field="source.stats.net_bytes_total")
 
     response = s.execute()

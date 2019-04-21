@@ -73,9 +73,9 @@ def get_training_data():
     train_labels = []
     for feature in train_features:
         if feature[1] == 9200 or feature[1] == 5601 or feature[3] == 9200 or feature[3] == 5601:
-            train_labels.append(0)
-        else:
             train_labels.append(1)
+        else:
+            train_labels.append(0)
 
     # set columns
     columns_ip = "source_ip source_port dest_ip dest_port".split(' ')
