@@ -29,7 +29,7 @@ sc = pyspark.SparkContext(appName="ml_kafka")
 sc.setLogLevel("ERROR")
 spark = SQLContext(sc)
 
-es = Elasticsearch(hosts="10.8.0.3")
+es = Elasticsearch(hosts="10.8.0.16")
 
 
 def train_dt_model():  # decision tree with pipeline
@@ -129,7 +129,7 @@ def get_rf_model(train_features_df):
         train_features_df)
 
     # Split the data into training and test sets (30% held out for testing)
-    (training_data, test_data) = train_features_df.randomSplit([0.7, 0.3])
+    #(training_data, test_data) = train_features_df.randomSplit([0.7, 0.3])
 
     # Train a RandomForest model.
     rf = RandomForestClassifier(labelCol="indexedLabel", featuresCol="indexedFeatures", numTrees=10)
@@ -142,13 +142,13 @@ def get_rf_model(train_features_df):
     pipeline = Pipeline(stages=[label_indexer, feature_indexer, rf, label_converter])
 
     # Train model.  This also runs the indexers.
-    rf_model = pipeline.fit(training_data)
+    rf_model = pipeline.fit(train_features_df)
     return rf_model
 
 
 def get_live_data():
     # pull live data set from es
-    es = Elasticsearch(hosts="10.8.0.3")
+    es = Elasticsearch(hosts="10.8.0.16")
     s = Search(using=es, index="*").filter("term", type="flow").filter('range',
                                                                        **{'@timestamp': {'gte': 'now-1h', 'lt': 'now'}})
 
@@ -175,7 +175,7 @@ def get_live_data():
 
 def get_predicted_data():
     # pull live data set from es
-    es = Elasticsearch(hosts="10.8.0.3")
+    es = Elasticsearch(hosts="10.8.0.16")
     s = Search(using=es, index="model_predictions*").filter('range', **{'@timestamp': {'gte': 'now-5m', 'lt': 'now'}})
 
     # s.aggs.bucket('by_timestamp', 'terms', field='@timestamp', size=999999999).metric('total_net_bytes', 'sum', field="source.stats.net_bytes_total")
@@ -194,14 +194,14 @@ def get_predicted_data():
     data = np.asarray(data)
     data_pddf = pd.DataFrame(data, columns=columns)
     data_df = spark.createDataFrame(data_pddf)
-    vecAssembler = VectorAssembler(inputCols=columns, outputCol="features")
-    data_df = vecAssembler.transform(data_df)
-    return (data_df)
+    vec_assembler = VectorAssembler(inputCols=columns, outputCol="features")
+    data_df = vec_assembler.transform(data_df)
+    return data_df
 
 
 def get_user_predictions():
     # pull live data set from es
-    es = Elasticsearch(hosts="10.8.0.3")
+    es = Elasticsearch(hosts="10.8.0.16")
     s = Search(using=es, index="user_predictions*").filter('range', **{'@timestamp': {'gte': 'now-5m', 'lt': 'now'}})
 
     # s.aggs.bucket('by_timestamp', 'terms', field='@timestamp', size=999999999).metric('total_net_bytes', 'sum', field="source.stats.net_bytes_total")
@@ -220,9 +220,9 @@ def get_user_predictions():
     data = np.asarray(data)
     data_pddf = pd.DataFrame(data, columns=columns)
     data_df = spark.createDataFrame(data_pddf)
-    vecAssembler = VectorAssembler(inputCols=columns, outputCol="features")
-    data_df = vecAssembler.transform(data_df)
-    return (data_df)
+    vec_assembler = VectorAssembler(inputCols=columns, outputCol="features")
+    data_df = vec_assembler.transform(data_df)
+    return data_df
 
 
 def ip2long(ip):
@@ -261,17 +261,17 @@ def process_batch(df, epoch_id):
     df = normalize_ips(df)
     # df.show()
     columns = ["source_ip", "source_port", "dest_ip", "dest_port"]
-    vecAssembler = VectorAssembler(inputCols=columns, outputCol="features")
-    df = vecAssembler.transform(df)
+    vec_assembler = VectorAssembler(inputCols=columns, outputCol="features")
+    df = vec_assembler.transform(df)
     # print(df)
     kmeans_model_result = kmeans_model.transform(df).withColumn('algo', F.lit('kmeans'))
     # kmeans_model_result.show()
-    ds = kmeans_model_result.selectExpr("CAST('key' AS STRING)", "to_json(struct(*)) AS value").write.format(
+    kmeans_model_result.selectExpr("CAST('key' AS STRING)", "to_json(struct(*)) AS value").write.format(
         "kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option("topic", "model_predictions").save()
 
     rf_model_result = rf_model.transform(df).withColumn('algo', F.lit('rf'))
     # rf_model_result.show()
-    ds = rf_model_result.selectExpr("CAST('key' AS STRING)", "to_json(struct(*)) AS value").write.format(
+    rf_model_result.selectExpr("CAST('key' AS STRING)", "to_json(struct(*)) AS value").write.format(
         "kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option("topic", "model_predictions").save()
 
 
@@ -287,7 +287,7 @@ def periodic_task():
     print('done')
 
 
-## get training data
+# get training data
 train_features, train_labels, train_features_df, train_labels_df = get_training_data()
 
 # create new dataframe for ml including labeling
@@ -320,20 +320,20 @@ schema = StructType() \
     .add("bytes_out", IntegerType()) \
     .add("ip", IntegerType()) \
     .add("client_ip", IntegerType()) \
-    .add("dest", StructType() \
-         .add('ip', StringType()) \
+    .add("dest", StructType()
+         .add('ip', StringType())
          .add('port', IntegerType())) \
-    .add("source", StructType() \
-         .add('ip', StringType()) \
+    .add("source", StructType()
+         .add('ip', StringType())
          .add('port', IntegerType())) \
-    .add("json", StructType() \
-         .add('event_type', StringType()) \
-         .add('src_ip', StringType()) \
-         .add('dest_ip', StringType()) \
-         .add('dns', StructType() \
-              .add('rrname', StringType()) \
-              .add('rrtype', StringType()))) \
- \
-# apply json schema 
+    .add("json", StructType()
+         .add('event_type', StringType())
+         .add('src_ip', StringType())
+         .add('dest_ip', StringType())
+         .add('dns', StructType()
+              .add('rrname', StringType())
+              .add('rrtype', StringType())))
+
+# apply json schema
 df = df.select(F.col("key").cast("string"), F.from_json(F.col("value").cast("string"), schema).alias('data'))
 df.writeStream.foreachBatch(process_batch).start().awaitTermination()

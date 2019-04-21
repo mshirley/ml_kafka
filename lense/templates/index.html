@@ -13,13 +13,12 @@
 
 <!-- Content -->
 {% block content %}
+<form name='test' id="contact-form" method="post" action="/submit" >
 	<div class="container">
-		<div class="header"><h1>Predictions</h1></div>
-		<hr />
-
-		<!-- Table -->
 		<table class="table table-hover">
 			<tr>
+				<th>prediction</th>
+				<th>prediction_id</th>
 				<th>source_ip</th>
 				<th>source_port</th>
 				<th>dest_ip</th>
@@ -27,13 +26,23 @@
 			</tr>
 			{% for _, row in live_data.iterrows() %}
 				<tr>
+                    <td>
+                        <div class="form-group">
+							<div class="form-check">
+								<input name="{{ row['id'] }}" class="form-check-input position-static" type="checkbox" id="blankCheckbox" value=true>
+							</div>
+						</div>
+
+					</td>
+					<td>{{ row['id'] }}</td>
                     <td>{{ row['source_ip'] }}</td>
 					<td>{{ row['source_port'] }}</td>
 					<td>{{ row['dest_ip'] }}</td>
 					<td>{{ row['dest_port'] }}</td>
-					<td><button type="button" class="btn btn-success">Success</button></td>
 				</tr>
 			{% endfor %}
+			<td><input type="submit" class="btn btn-success"></input></td>
 		</table>
 	</div>
+</form>
 {% endblock %}
