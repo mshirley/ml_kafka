@@ -22,7 +22,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import *
 
 os.environ['PYSPARK_SUBMIT_ARGS'] = \
-    '--conf "spark.redis.host=10.8.0.7" --jars /home/user/spark-redis-2.3.1-SNAPSHOT-jar-with-dependencies.jar --packages org.apache.spark:spark-sql-kafka-0-10_2.11:2.4.0,org.elasticsearch:elasticsearch-hadoop:6.6.1 pyspark-shell'
+    '--conf "spark.redis.host=10.8.0.7" --jars /home/user/spark-redis-2.3.1-SNAPSHOT-jar-with-dependencies.jar --packages org.elasticsearch:elasticsearch-hadoop:7.0.0,org.apache.spark:spark-sql-kafka-0-10_2.11:2.4.0,org.elasticsearch:elasticsearch-hadoop:6.6.1 pyspark-shell'
 # '--master spark://10.8.0.9:7077 --total-executor-cores 4 --packages org.apache.spark:spark-sql-kafka-0-10_2.11:2.4.0,org.elasticsearch:elasticsearch-hadoop:6.6.1 pyspark-shell'
 
 sc = pyspark.SparkContext(appName="ml_kafka")
@@ -129,7 +129,7 @@ def get_rf_model(train_features_df):
         train_features_df)
 
     # Split the data into training and test sets (30% held out for testing)
-    #(training_data, test_data) = train_features_df.randomSplit([0.7, 0.3])
+    # (training_data, test_data) = train_features_df.randomSplit([0.7, 0.3])
 
     # Train a RandomForest model.
     rf = RandomForestClassifier(labelCol="indexedLabel", featuresCol="indexedFeatures", numTrees=10)
@@ -150,7 +150,7 @@ def get_live_data():
     # pull live data set from es
     es = Elasticsearch(hosts="10.8.0.16")
     s = Search(using=es, index="*").filter("term", type="flow").filter('range',
-                                                                       **{'@timestamp': {'gte': 'now-1h', 'lt': 'now'}})
+                                                                       **{'@timestamp': {'gte': 'now-5m', 'lt': 'now'}})
 
     # s.aggs.bucket('by_timestamp', 'terms', field='@timestamp', size=999999999).metric('total_net_bytes', 'sum', field="source.stats.net_bytes_total")
 
@@ -194,34 +194,29 @@ def get_predicted_data():
     data = np.asarray(data)
     data_pddf = pd.DataFrame(data, columns=columns)
     data_df = spark.createDataFrame(data_pddf)
-    vec_assembler = VectorAssembler(inputCols=columns, outputCol="features")
-    data_df = vec_assembler.transform(data_df)
     return data_df
 
 
 def get_user_predictions():
     # pull live data set from es
     es = Elasticsearch(hosts="10.8.0.16")
-    s = Search(using=es, index="user_predictions*").filter('range', **{'@timestamp': {'gte': 'now-5m', 'lt': 'now'}})
-
-    # s.aggs.bucket('by_timestamp', 'terms', field='@timestamp', size=999999999).metric('total_net_bytes', 'sum', field="source.stats.net_bytes_total")
-
-    # ['@timestamp', '@version', 'data', 'dest_ip', 'dest_port', 'features', 'indexedFeatures', 'meta', 'predictedLabel', 'prediction', 'probability', 'rawPrediction', 'source_ip', 'source_port', 'tags']
+    s = Search(using=es, index="user_predictions*").filter('range', **{'@timestamp': {'gte': 'now-1h', 'lt': 'now'}})
 
     response = s.scan()
 
     data = []
     for hit in response:
-        if "predictedLabel" in hit:
+        if "label" in hit:
             data.append([int(hit.source_ip), int(hit.source_port), int(hit.dest_ip), int(hit.dest_port),
-                         int(hit.predictedLabel)])
+                         int(hit.label)])
 
     columns = ["source_ip", "source_port", "dest_ip", "dest_port", "label"]
     data = np.asarray(data)
     data_pddf = pd.DataFrame(data, columns=columns)
     data_df = spark.createDataFrame(data_pddf)
-    vec_assembler = VectorAssembler(inputCols=columns, outputCol="features")
-    data_df = vec_assembler.transform(data_df)
+    feature_columns = ["source_ip", "source_port", "dest_ip", "dest_port"]
+    vec_assembler = VectorAssembler(inputCols=feature_columns, outputCol="features")
+    data_df = vec_assembler.transform(data_df).select('source_ip','source_port','dest_ip','dest_port','features','label').withColumn('label', F.col('label').cast('int'))
     return data_df
 
 
@@ -230,23 +225,29 @@ def ip2long(ip):
     Convert an IP string to long
     """
     if ip:
-        packedIP = socket.inet_aton(ip)
-        return struct.unpack("!L", packedIP)[0]
+        packed_ip = socket.inet_aton(ip)
+        return struct.unpack("!L", packed_ip)[0]
 
 
 ip2long_udf = F.udf(ip2long, LongType())
 
 
 def normalize_ips(df):
-    df = df.withColumn('source_ip', F.col('data.json.src_ip')).withColumn('dest_ip',
-                                                                          F.col('data.json.dest_ip')).withColumn(
-        'source_ip', F.col('data.client_ip')).withColumn('dest_ip', F.col('data.ip')).withColumn('dest_ip', F.col(
-        'data.dest.ip')).withColumn('source_ip', F.col('data.source.ip')).withColumn('dest_port', F.col(
-        'data.dest.port')).withColumn('source_port', F.col('data.source.port')).filter('source_ip is not NULL').filter(
-        'dest_ip is not NULL').filter('source_port is not NULL').filter('dest_port is not NULL')
-    df = df.withColumn('source_ip', ip2long_udf(F.col('source_ip'))).withColumn('dest_ip',
-                                                                                ip2long_udf(F.col('dest_ip')))
-    return (df)
+    df = (df.withColumn('source_ip', F.col('data.json.src_ip'))
+          .withColumn('dest_ip', F.col('data.json.dest_ip'))
+          .withColumn('source_ip', F.col('data.client_ip'))
+          .withColumn('dest_ip', F.col('data.ip'))
+          .withColumn('dest_ip', F.col('data.dest.ip'))
+          .withColumn('source_ip', F.col('data.source.ip'))
+          .withColumn('dest_port', F.col('data.dest.port'))
+          .withColumn('source_port', F.col('data.source.port'))
+          .filter('source_ip is not NULL')
+          .filter('dest_ip is not NULL')
+          .filter('source_port is not NULL')
+          .filter('dest_port is not NULL'))
+    df = (df.withColumn('source_ip', ip2long_udf(F.col('source_ip')))
+          .withColumn('dest_ip', ip2long_udf(F.col('dest_ip'))))
+    return df
 
 
 def process_batch(df, epoch_id):
@@ -259,7 +260,6 @@ def process_batch(df, epoch_id):
         except Exception as e:
             print('unable to load modules, {}'.format(e))
     df = normalize_ips(df)
-    # df.show()
     columns = ["source_ip", "source_port", "dest_ip", "dest_port"]
     vec_assembler = VectorAssembler(inputCols=columns, outputCol="features")
     df = vec_assembler.transform(df)
@@ -276,67 +276,81 @@ def process_batch(df, epoch_id):
 
 
 def periodic_task():
-    print('getting predicted data')
-    ml_df_training = get_predicted_data()
+    print('getting live data')
+    live_data = get_live_data()
     print('done')
+    live_data_predictions = live_data.withColumn('label',
+                                                 F.when(F.col('dest_port') == 9200, 1)
+                                                 .when(F.col('source_port') == 9200, 1)
+                                                 .when(F.col('dest_port') == 5601, 1)
+                                                 .when(F.col('source_port') == 5601, 1)
+                                                 .otherwise(0))
+    print('getting user predictions')
+    user_predictions = get_user_predictions()
+    print('done')
+    df = spark.createDataFrame(sc.emptyRDD(), live_data_predictions.schema)
+    data = df.union(user_predictions)
     print('training models and saving to disk')
-    kmeans_model = get_kmeans_model(ml_df_training)
+    kmeans_model = get_kmeans_model(data)
     kmeans_model.write().overwrite().save('hdfs://10.8.0.11:9000/data/models/kmeans_model')
-    rf_model = get_rf_model(ml_df_training)
+    rf_model = get_rf_model(data)
     rf_model.write().overwrite().save('hdfs://10.8.0.11:9000/data/models/rf_model')
     print('done')
 
 
-# get training data
-train_features, train_labels, train_features_df, train_labels_df = get_training_data()
+def start_up():
+    # ml_df_live = get_live_data().withColumn('label', F.when(F.col('dest_port') == 9200, 1).when(F.col('source_port') == 5600, 1).otherwise(0))
+    # get_outliers(train_features, train_labels)
 
-# create new dataframe for ml including labeling
-ml_df_training = train_features_df.withColumn('label',
-                                              F.when(F.col('dest_port') == 9200, 1)
-                                              .when(F.col('source_port') == 9200, 1)
-                                              .when(F.col('dest_port') == 5601, 1)
-                                              .when(F.col('source_port') == 5601, 1)
-                                              .otherwise(0))
+    scheduler = BackgroundScheduler()
+    scheduler.start()
+    scheduler.add_job(periodic_task, "interval", minutes=5)
 
-print('training initial models and saving to disk')
-kmeans_model = get_kmeans_model(ml_df_training)
-kmeans_model.write().overwrite().save('hdfs://10.8.0.11:9000/data/models/kmeans_model')
-rf_model = get_rf_model(ml_df_training)
-rf_model.write().overwrite().save('hdfs://10.8.0.11:9000/data/models/rf_model')
-print('done')
+    df = spark.readStream.format("kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option(
+        "kafkaConsumer.pollTimeoutMs", 10000).option("subscribe", "beats").load()
 
-# ml_df_live = get_live_data().withColumn('label', F.when(F.col('dest_port') == 9200, 1).when(F.col('source_port') == 5600, 1).otherwise(0))
-# get_outliers(train_features, train_labels)
+    df = df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
 
-scheduler = BackgroundScheduler()
-scheduler.start()
-scheduler.add_job(periodic_task, "interval", minutes=5)
+    # define schema of json
+    schema = StructType() \
+        .add("@timestamp", StringType()) \
+        .add("bytes_out", IntegerType()) \
+        .add("ip", IntegerType()) \
+        .add("client_ip", IntegerType()) \
+        .add("dest", StructType()
+             .add('ip', StringType())
+             .add('port', IntegerType())) \
+        .add("source", StructType()
+             .add('ip', StringType())
+             .add('port', IntegerType())) \
+        .add("json", StructType()
+             .add('event_type', StringType())
+             .add('src_ip', StringType())
+             .add('dest_ip', StringType())
+             .add('dns', StructType()
+                  .add('rrname', StringType())
+                  .add('rrtype', StringType())))
 
-df = spark.readStream.format("kafka").option("kafka.bootstrap.servers", "10.8.0.8:9092").option(
-    "kafkaConsumer.pollTimeoutMs", 10000).option("subscribe", "beats").load()
+    # apply json schema
+    df = df.select(F.col("key").cast("string"), F.from_json(F.col("value").cast("string"), schema).alias('data'))
+    df.writeStream.foreachBatch(process_batch).start().awaitTermination()
 
-df = df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
 
-# define schema of json
-schema = StructType() \
-    .add("@timestamp", StringType()) \
-    .add("bytes_out", IntegerType()) \
-    .add("ip", IntegerType()) \
-    .add("client_ip", IntegerType()) \
-    .add("dest", StructType()
-         .add('ip', StringType())
-         .add('port', IntegerType())) \
-    .add("source", StructType()
-         .add('ip', StringType())
-         .add('port', IntegerType())) \
-    .add("json", StructType()
-         .add('event_type', StringType())
-         .add('src_ip', StringType())
-         .add('dest_ip', StringType())
-         .add('dns', StructType()
-              .add('rrname', StringType())
-              .add('rrtype', StringType())))
-
-# apply json schema
-df = df.select(F.col("key").cast("string"), F.from_json(F.col("value").cast("string"), schema).alias('data'))
-df.writeStream.foreachBatch(process_batch).start().awaitTermination()
+if __name__ == "__main__":    # get training data
+    live_data = get_live_data()
+    live_data_predictions = live_data.withColumn('label',
+                                                 F.when(F.col('dest_port') == 9200, 1)
+                                                 .when(F.col('source_port') == 9200, 1)
+                                                 .when(F.col('dest_port') == 5601, 1)
+                                                 .when(F.col('source_port') == 5601, 1)
+                                                 .otherwise(0))
+    user_predictions = get_user_predictions()
+    df = spark.createDataFrame(sc.emptyRDD(), live_data_predictions.schema)
+    data = df.union(user_predictions)
+    print('training initial models and saving to disk')
+    kmeans_model = get_kmeans_model(data)
+    kmeans_model.write().overwrite().save('hdfs://10.8.0.11:9000/data/models/kmeans_model')
+    rf_model = get_rf_model(data)
+    rf_model.write().overwrite().save('hdfs://10.8.0.11:9000/data/models/rf_model')
+    print('done')
+    start_up()

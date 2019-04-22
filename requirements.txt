@@ -1,3 +1,5 @@
+pykafka
+flask
 redis
 APScheduler==3.6.0
 cycler==0.10.0

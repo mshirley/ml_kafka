@@ -19,25 +19,31 @@
 			<tr>
 				<th>prediction</th>
 				<th>prediction_id</th>
-				<th>source_ip</th>
+				<th>source_ipv4</th>
 				<th>source_port</th>
-				<th>dest_ip</th>
+				<th>dest_ipv4</th>
 				<th>dest_port</th>
 			</tr>
 			{% for _, row in live_data.iterrows() %}
 				<tr>
                     <td>
-                        <div class="form-group">
-							<div class="form-check">
-								<input name="{{ row['id'] }}" class="form-check-input position-static" type="checkbox" id="blankCheckbox" value=true>
-							</div>
+						<div class="form-check">
+						  <input class="form-check-input" type="radio" name="{{ row['id'] }}" id="positive" value="true">
+						  <label class="form-check-label" for="positive">
+                              Positive
+						  </label>
 						</div>
-
+						<div class="form-check">
+						  <input class="form-check-input" type="radio" name="{{ row['id'] }}" id="negative" value="false" checked>
+						  <label class="form-check-label" for="negative">
+							  Negative
+						  </label>
+						</div>
 					</td>
 					<td>{{ row['id'] }}</td>
-                    <td>{{ row['source_ip'] }}</td>
+                    <td>{{ row['source_ipv4'] }}</td>
 					<td>{{ row['source_port'] }}</td>
-					<td>{{ row['dest_ip'] }}</td>
+					<td>{{ row['dest_ipv4'] }}</td>
 					<td>{{ row['dest_port'] }}</td>
 				</tr>
 			{% endfor %}
