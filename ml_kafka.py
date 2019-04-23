@@ -56,7 +56,6 @@ def get_live_data():
     feature_data = []
     for hit in response:
         if 'port' in hit.source and 'ip' in hit.source:
-            # print(ip2long(hit.source.ip), hit.source.port, ip2long(hit.dest.ip), hit.dest.port)
             feature_data.append([ip2long(hit.source.ip), hit.source.port, ip2long(hit.dest.ip), hit.dest.port])
 
     # create dataframes for live data
@@ -204,8 +203,8 @@ if __name__ == "__main__":  # get training data
     data = empty_df.union(user_predictions)
     print('training initial models and saving to disk')
     kmeans_model = get_kmeans_model(data)
-    kmeans_model.write().overwrite().save('hdfs://10.8.0.11:9000/data/models/kmeans_model')
+    kmeans_model.write().overwrite().save('hdfs://hdfs:9000/data/models/kmeans_model')
     rf_model = get_rf_model(data)
-    rf_model.write().overwrite().save('hdfs://10.8.0.11:9000/data/models/rf_model')
+    rf_model.write().overwrite().save('hdfs://hdfs:9000/data/models/rf_model')
     print('done')
     start_up()
