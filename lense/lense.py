@@ -16,8 +16,8 @@ from pykafka import KafkaClient
 app = Flask(__name__)
 bootstrap = Bootstrap(app)
 
-r = redis.StrictRedis(host="10.8.0.16", port=6379, db=0)
-k = KafkaClient(hosts="10.8.0.8:9092")
+r = redis.StrictRedis(host="redis", port=6379, db=0)
+k = KafkaClient(hosts="kafka:9092")
 topic = k.topics['user_predictions']
 
 
@@ -32,7 +32,7 @@ def ip2long(ip):
 
 def get_live_data():
     # pull live data set from es
-    es = Elasticsearch(hosts="10.8.0.16")
+    es = Elasticsearch(hosts="elasticsearch")
     s = Search(using=es, index="*").filter("term", type="flow").filter('range',
                                                                        **{'@timestamp': {'gte': 'now-1m', 'lt': 'now'}})
 

@@ -49,26 +49,6 @@ def get_rf_model(train_features_df):
     return model
 
 
-def get_live_data():
-    s = Search(using=es, index="*").filter("term", type="flow").filter('range',
-                                                                       **{'@timestamp': {'gte': 'now-1m', 'lt': 'now'}})
-    response = s.scan()
-    feature_data = []
-    for hit in response:
-        if 'port' in hit.source and 'ip' in hit.source:
-            feature_data.append([ip2long(hit.source.ip), hit.source.port, ip2long(hit.dest.ip), hit.dest.port])
-
-    # create dataframes for live data
-    data_array = np.asarray(feature_data)
-    columns = ["source_ip", "source_port", "dest_ip", "dest_port"]
-    data_pddf = pd.DataFrame(data_array, columns=columns)
-    data_df = spark.createDataFrame(data_pddf)
-
-    vec_assembler = VectorAssembler(inputCols=columns, outputCol="features")
-    data_df = vec_assembler.transform(data_df)
-    return data_df
-
-
 def get_user_predictions():
     s = Search(using=es, index="user_predictions*").filter('range', **{'@timestamp': {'gte': 'now-1h', 'lt': 'now'}})
     response = s.scan()
@@ -151,12 +131,10 @@ def periodic_task():
     print('getting user predictions')
     new_user_predictions = get_user_predictions()
     print('done')
-    df = spark.createDataFrame(sc.emptyRDD(), live_data_predictions.schema)
-    data_df = df.union(new_user_predictions)
     print('training models and saving to disk')
-    kmeans_model = get_kmeans_model(data_df)
+    kmeans_model = get_kmeans_model(new_user_predictions)
     kmeans_model.write().overwrite().save('hdfs://hdfs:9000/data/models/kmeans_model')
-    rf_model = get_rf_model(data_df)
+    rf_model = get_rf_model(new_user_predictions)
     rf_model.write().overwrite().save('hdfs://hdfs:9000/data/models/rf_model')
     print('done')
 
@@ -190,21 +168,12 @@ def start_up():
     df.writeStream.foreachBatch(process_batch).start().awaitTermination()
 
 
-if __name__ == "__main__":  # get training data
-    live_data = get_live_data()
-    live_data_predictions = live_data.withColumn('label',
-                                                 F.when(F.col('dest_port') == 9200, 1)
-                                                 .when(F.col('source_port') == 9200, 1)
-                                                 .when(F.col('dest_port') == 5601, 1)
-                                                 .when(F.col('source_port') == 5601, 1)
-                                                 .otherwise(0))
+if __name__ == "__main__":
     user_predictions = get_user_predictions()
-    empty_df = spark.createDataFrame(sc.emptyRDD(), live_data_predictions.schema)
-    data = empty_df.union(user_predictions)
     print('training initial models and saving to disk')
-    kmeans_model = get_kmeans_model(data)
+    kmeans_model = get_kmeans_model(user_predictions)
     kmeans_model.write().overwrite().save('hdfs://hdfs:9000/data/models/kmeans_model')
-    rf_model = get_rf_model(data)
+    rf_model = get_rf_model(user_predictions)
     rf_model.write().overwrite().save('hdfs://hdfs:9000/data/models/rf_model')
     print('done')
     start_up()
