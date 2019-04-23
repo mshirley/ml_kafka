@@ -21,35 +21,47 @@ from pyspark.ml.feature import VectorAssembler
 from pyspark.sql import functions as F
 from pyspark.sql.types import *
 
-os.environ['PYSPARK_SUBMIT_ARGS'] = \
-    '--packages org.apache.spark:spark-sql-kafka-0-10_2.11:2.4.1 pyspark-shell'
-
+os.environ['PYSPARK_SUBMIT_ARGS'] = '--packages org.apache.spark:spark-sql-kafka-0-10_2.11:2.4.1 pyspark-shell'
 sc = pyspark.SparkContext(appName="ml_kafka")
 sc.setLogLevel("ERROR")
 spark = SQLContext(sc)
-
 es = Elasticsearch(hosts="elasticsearch")
 
 
-def get_kmeans_model(train_features_df):
+def get_kmeans_model(data):
+    """
+    Train kmeans model
+
+    :param data:
+    :return: model
+    """
     kmeans = KMeans(k=10, seed=1)
-    model = kmeans.fit(train_features_df.select('features'))
+    model = kmeans.fit(data.select('features'))
     return model
 
 
-def get_rf_model(train_features_df):
-    label_indexer = StringIndexer(inputCol="label", outputCol="indexedLabel").fit(train_features_df)
-    feature_indexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=4).fit(
-        train_features_df)
+def get_rf_model(data):
+    """
+    Train RandomForest model
+
+    :param data:
+    :return:  model
+    """
+    label_indexer = StringIndexer(inputCol="label", outputCol="indexedLabel").fit(data)
+    feature_indexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=4).fit(data)
     rf = RandomForestClassifier(labelCol="indexedLabel", featuresCol="indexedFeatures", numTrees=10)
-    label_converter = IndexToString(inputCol="prediction", outputCol="predictedLabel",
-                                    labels=label_indexer.labels)
+    label_converter = IndexToString(inputCol="prediction", outputCol="predictedLabel", labels=label_indexer.labels)
     pipeline = Pipeline(stages=[label_indexer, feature_indexer, rf, label_converter])
-    model = pipeline.fit(train_features_df)
+    model = pipeline.fit(data)
     return model
 
 
 def get_user_predictions():
+    """
+    Query elasticsearch for lense predictions
+
+    :return: user predictions
+    """
     s = Search(using=es, index="user_predictions*").filter('range', **{'@timestamp': {'gte': 'now-1h', 'lt': 'now'}})
     response = s.scan()
     feature_data = []
@@ -76,6 +88,7 @@ def get_user_predictions():
 def ip2long(ip):
     """
     Convert an IP string to long
+
     """
     if ip:
         packed_ip = socket.inet_aton(ip)
@@ -86,6 +99,12 @@ ip2long_udf = F.udf(ip2long, LongType())
 
 
 def normalize_ips(df):
+    """
+    Normalize ips from a variety of field names to a standard set
+
+    :param df:
+    :return: dataframe with normalized ips
+    """
     df = (df.withColumn('source_ip', F.col('data.json.src_ip'))
           .withColumn('dest_ip', F.col('data.json.dest_ip'))
           .withColumn('source_ip', F.col('data.client_ip'))
@@ -104,6 +123,12 @@ def normalize_ips(df):
 
 
 def process_batch(df, epoch_id):
+    """
+    Spark streaming callback to handle kafka batches
+
+    :param df:
+    :param epoch_id:
+    """
     print(epoch_id)
     if epoch_id % 100 == 0:
         try:
@@ -128,6 +153,10 @@ def process_batch(df, epoch_id):
 
 
 def periodic_task():
+    """
+    Execute periodic task to get new user predictions and save models to disk
+
+    """
     print('getting user predictions')
     new_user_predictions = get_user_predictions()
     print('done')
@@ -140,6 +169,10 @@ def periodic_task():
 
 
 def start_up():
+    """
+    schedule periodic task, create spark streaming context, and execute
+
+    """
     scheduler = BackgroundScheduler()
     scheduler.start()
     scheduler.add_job(periodic_task, "interval", minutes=5)

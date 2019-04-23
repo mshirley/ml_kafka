@@ -12,18 +12,20 @@ import uuid
 import redis
 from pykafka import KafkaClient
 
-
 app = Flask(__name__)
 bootstrap = Bootstrap(app)
-
 r = redis.StrictRedis(host="redis", port=6379, db=0)
 k = KafkaClient(hosts="kafka:9092")
 topic = k.topics['user_predictions']
+es = Elasticsearch(hosts="elasticsearch")
 
 
 def ip2long(ip):
     """
-    Convert an IP string to long
+    Convert ip to long
+
+    :param ip:
+    :return: long ip
     """
     if ip:
         packed_ip = socket.inet_aton(ip)
@@ -31,27 +33,26 @@ def ip2long(ip):
 
 
 def get_live_data():
-    # pull live data set from es
-    es = Elasticsearch(hosts="elasticsearch")
+    """
+    Query elasticsearch for live data
+
+    :return: data pandas dataframe
+    """
     s = Search(using=es, index="*").filter("term", type="flow").filter('range',
                                                                        **{'@timestamp': {'gte': 'now-1m', 'lt': 'now'}})
-
-    # s.aggs.bucket('by_timestamp', 'terms', field='@timestamp', size=999999999).metric('total_net_bytes', 'sum', field="source.stats.net_bytes_total")
-
     response = s.execute()
-
     data = []
     for hit in response:
         if 'port' in hit.source and 'ip' in hit.source:
-            # print(hit.source.ip, ip2long(hit.source.ip), hit.source.port, hit.dest.ip, ip2long(hit.dest.ip), hit.dest.port)
             id = uuid.uuid4().node
-            data.append([id, hit.source.ip, ip2long(hit.source.ip), hit.source.port, hit.dest.ip, ip2long(hit.dest.ip), hit.dest.port])
-            #data.append([id, hit.source.ip, hit.source.port, hit.dest.ip, hit.dest.port])
-            r.set(id, json.dumps([id, hit.source.ip, ip2long(hit.source.ip), hit.source.port, hit.dest.ip, ip2long(hit.dest.ip), hit.dest.port]))
+            data.append([id, hit.source.ip, ip2long(hit.source.ip), hit.source.port, hit.dest.ip, ip2long(hit.dest.ip),
+                         hit.dest.port])
+            r.set(id, json.dumps(
+                [id, hit.source.ip, ip2long(hit.source.ip), hit.source.port, hit.dest.ip, ip2long(hit.dest.ip),
+                 hit.dest.port]))
     if data is []:
-        data.append(['nodata','nodata', 'nodata','nodata','nodata','nodata','nodata'])
+        data.append(['nodata', 'nodata', 'nodata', 'nodata', 'nodata', 'nodata', 'nodata'])
     print(data)
-    # create dataframes for live data
     data = np.asarray(data)
     columns = ["id", "source_ipv4", "source_ip", "source_port", "dest_ipv4", "dest_ip", "dest_port"]
     data_pddf = pd.DataFrame(data, columns=columns)
@@ -59,6 +60,11 @@ def get_live_data():
 
 
 def to_kafka(data):
+    """
+    send data to kafka
+
+    :param data:
+    """
     try:
         print(data)
         print(type(data))
@@ -71,9 +77,13 @@ def to_kafka(data):
         pass
 
 
-# Setup Homepage Route
 @app.route('/')
 def index():
+    """
+    main index route
+
+    :return:
+    """
     live_data = get_live_data()
     print(live_data)
     return render_template('index.html', live_data=live_data)
@@ -81,12 +91,17 @@ def index():
 
 @app.route('/submit', methods=['POST', 'GET'])
 def submit():
+    """
+    submission route
+
+    :return:
+    """
     print(request.form)
     print(request.args)
     results = []
     print(request.form.keys())
     for k, v in request.form.items():
-        print(k,v)
+        print(k, v)
         data = json.loads(r.get(k))
         print(data)
         id = data[0]
