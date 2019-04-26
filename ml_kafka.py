@@ -9,6 +9,7 @@ import sys
 import numpy as np
 import pandas as pd
 import pyspark
+import json
 from apscheduler.schedulers.background import BackgroundScheduler
 from elasticsearch import Elasticsearch
 from elasticsearch_dsl import Search
@@ -62,16 +63,49 @@ def get_user_predictions():
 
     :return: user predictions
     """
+    try:
+        with open('data/user_predictions_schema.json') as f:
+            schema = json.loads(f.read())
+    except Exception as e:
+        print('unable to load data/user_predictions_schema.json: {}'.format(e))
+    print(schema)
+    columns = schema['columns']
+    feature_columns = schema['feature_columns']
     s = Search(using=es, index="user_predictions*").filter('range', **{'@timestamp': {'gte': 'now-1h', 'lt': 'now'}})
     response = s.scan()
     feature_data = []
     for hit in response:
         if "label" in hit:
-            feature_data.append([int(hit.source_ip), int(hit.source_port), int(hit.dest_ip), int(hit.dest_port),
-                                int(hit.label)])
+            feature_data.append([hit[x] for x in columns])
     if feature_data == []:
         print('no user predictions available, create some using lense')
         sys.exit(1)
+    else:
+        feature_data = np.asarray(feature_data)
+        data_pddf = pd.DataFrame(feature_data, columns=columns)
+        data_df = spark.createDataFrame(data_pddf)
+        vec_assembler = VectorAssembler(inputCols=feature_columns, outputCol="features")
+        columns.append('features')
+        data_df = vec_assembler.transform(data_df).select(columns).withColumn('label', F.col('label').cast('int'))
+    return data_df
+
+
+def get_validated_predictions():
+    """
+    Query elasticsearch for lense predictions that have been validated
+
+    :return: user predictions
+    """
+    s = Search(using=es, index="validated_predictions*").filter('range', **{'@timestamp': {'gte': 'now-1h', 'lt': 'now'}})
+    response = s.scan()
+    feature_data = []
+    for hit in response:
+        if "validated_label" in hit:
+            feature_data.append([int(hit.source_ip), int(hit.source_port), int(hit.dest_ip), int(hit.dest_port),
+                                int(hit.validated_label)])
+    if feature_data == []:
+        print('no validated predictions available, create some using lense')
+        data_df = None
     else:
         columns = ["source_ip", "source_port", "dest_ip", "dest_port", "label"]
         feature_data = np.asarray(feature_data)
@@ -138,7 +172,14 @@ def process_batch(df, epoch_id):
             global rf_model
             rf_model = PipelineModel.load('hdfs://hdfs:9000/data/models/rf_model')
         except Exception as e:
-            print('unable to load modules, {}'.format(e))
+            print('unable to load models, {}'.format(e))
+        try:
+            global validated_kmeans_model
+            validated_kmeans_model = KMeansModel.load('hdfs://hdfs:9000/data/models/validated_kmeans_model')
+            global validated_rf_model
+            validated_rf_model = PipelineModel.load('hdfs://hdfs:9000/data/models/validated_rf_model')
+        except Exception as e:
+            print('unable to load validated models, {}'.format(e))
     df = normalize_ips(df)
     columns = ["source_ip", "source_port", "dest_ip", "dest_port"]
     vec_assembler = VectorAssembler(inputCols=columns, outputCol="features")
@@ -150,6 +191,14 @@ def process_batch(df, epoch_id):
     rf_model_result = rf_model.transform(df).withColumn('algo', F.lit('rf'))
     rf_model_result.selectExpr("CAST('key' AS STRING)", "to_json(struct(*)) AS value").write.format(
         "kafka").option("kafka.bootstrap.servers", "kafka:9092").option("topic", "model_predictions").save()
+    if validated_kmeans_model and validated_rf_model:
+        validated_kmeans_model_result = kmeans_model.transform(df).withColumn('algo', F.lit('kmeans'))
+        validated_kmeans_model_result.selectExpr("CAST('key' AS STRING)", "to_json(struct(*)) AS value").write.format(
+            "kafka").option("kafka.bootstrap.servers", "kafka:9092").option("topic", "strong_predictions").save()
+
+        validated_rf_model_result = rf_model.transform(df).withColumn('algo', F.lit('rf'))
+        validated_rf_model_result.selectExpr("CAST('key' AS STRING)", "to_json(struct(*)) AS value").write.format(
+            "kafka").option("kafka.bootstrap.servers", "kafka:9092").option("topic", "strong_predictions").save()
 
 
 def periodic_task():
@@ -160,11 +209,18 @@ def periodic_task():
     print('getting user predictions')
     new_user_predictions = get_user_predictions()
     print('done')
+    print('getting validated predictions')
+    new_validated_predictions = get_validated_predictions()
+    print('done')
     print('training models and saving to disk')
     kmeans_model = get_kmeans_model(new_user_predictions)
     kmeans_model.write().overwrite().save('hdfs://hdfs:9000/data/models/kmeans_model')
     rf_model = get_rf_model(new_user_predictions)
     rf_model.write().overwrite().save('hdfs://hdfs:9000/data/models/rf_model')
+    validated_kmeans_model = get_kmeans_model(new_validated_predictions)
+    validated_kmeans_model.write().overwrite().save('hdfs://hdfs:9000/data/models/validated_kmeans_model')
+    validated_rf_model = get_rf_model(new_validated_predictions)
+    validated_rf_model.write().overwrite().save('hdfs://hdfs:9000/data/models/validated_rf_model')
     print('done')
 
 
@@ -179,30 +235,43 @@ def start_up():
     df = spark.readStream.format("kafka").option("kafka.bootstrap.servers", "kafka:9092").option(
         "kafkaConsumer.pollTimeoutMs", 10000).option("subscribe", "beats").load()
     df = df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
-    schema = StructType() \
-        .add("@timestamp", StringType()) \
-        .add("bytes_out", IntegerType()) \
-        .add("ip", IntegerType()) \
-        .add("client_ip", IntegerType()) \
-        .add("dest", StructType()
-             .add('ip', StringType())
-             .add('port', IntegerType())) \
-        .add("source", StructType()
-             .add('ip', StringType())
-             .add('port', IntegerType())) \
-        .add("json", StructType()
-             .add('event_type', StringType())
-             .add('src_ip', StringType())
-             .add('dest_ip', StringType())
-             .add('dns', StructType()
-                  .add('rrname', StringType())
-                  .add('rrtype', StringType())))
+    try:
+        with open('data/kafka_schema.json') as f:
+            schema = StructType.fromJson(json.loads(f.read()))
+    except Exception as e:
+        print('unable to read data/kafka_schema.json')
+        sys.exit(1)
+    #schema = StructType() \
+    #    .add("@timestamp", StringType()) \
+    #    .add("bytes_out", IntegerType()) \
+    #    .add("ip", IntegerType()) \
+    #    .add("client_ip", IntegerType()) \
+    #    .add("dest", StructType()
+    #         .add('ip', StringType())
+    #         .add('port', IntegerType())) \
+    #    .add("source", StructType()
+    #         .add('ip', StringType())
+    #         .add('port', IntegerType())) \
+    #    .add("json", StructType()
+    #         .add('event_type', StringType())
+    #         .add('src_ip', StringType())
+    #         .add('dest_ip', StringType())
+    #         .add('dns', StructType()
+    #              .add('rrname', StringType())
+    #              .add('rrtype', StringType())))
     df = df.select(F.col("key").cast("string"), F.from_json(F.col("value").cast("string"), schema).alias('data'))
     df.writeStream.foreachBatch(process_batch).start().awaitTermination()
 
 
 if __name__ == "__main__":
     user_predictions = get_user_predictions()
+    validated_predictions = get_validated_predictions()
+    if validated_predictions is not None:
+        validated_kmeans_model = get_kmeans_model(validated_predictions)
+        validated_kmeans_model.write().overwrite().save('hdfs://hdfs:9000/data/models/validated_kmeans_model')
+        validated_rf_model = get_rf_model(validated_predictions)
+        validated_rf_model.write().overwrite().save('hdfs://hdfs:9000/data/models/validated_rf_model')
+
     print('training initial models and saving to disk')
     kmeans_model = get_kmeans_model(user_predictions)
     kmeans_model.write().overwrite().save('hdfs://hdfs:9000/data/models/kmeans_model')

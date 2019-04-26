@@ -1,0 +1,57 @@
+{% extends 'bootstrap/base.html' %}
+
+<!-- Navigation Bar -->
+{% block navbar %}
+    <nav class="navbar navbar-default" role="navigation">
+        <div class="container">
+            <div class="navbar-header">
+                <a class="navbar-brand" href="/user_predictions">User Predictions</a>
+                <a class="navbar-brand" href="#">Validate Predictions</a>
+            </div>
+        </div>
+    </nav>
+{% endblock %}
+
+<!-- Content -->
+{% block content %}
+<form name='test' id="contact-form" method="post" action="/submit_validated_predictions" >
+    <div class="container">
+        <table class="table table-hover">
+            <tr>
+                <th>prediction</th>
+                <th>prediction_id</th>
+                <th>predicted_label</th>
+                <th>source_ipv4</th>
+                <th>source_port</th>
+                <th>dest_ipv4</th>
+                <th>dest_port</th>
+            </tr>
+            {% for _, row in prediction_data.iterrows() %}
+                <tr>
+                    <td>
+                        <div class="form-check">
+                          <input class="form-check-input" type="radio" name="{{ row['id'] }}" id="positive" value="true">
+                          <label class="form-check-label" for="positive">
+                              Positive
+                          </label>
+                        </div>
+                        <div class="form-check">
+                          <input class="form-check-input" type="radio" name="{{ row['id'] }}" id="negative" value="false" checked>
+                          <label class="form-check-label" for="negative">
+                              Negative
+                          </label>
+                        </div>
+                    </td>
+                    <td>{{ row['id'] }}</td>
+                    <td>{{ row['predictedLabel'] }}</td>
+                    <td>{{ row['source_ipv4'] }}</td>
+                    <td>{{ row['source_port'] }}</td>
+                    <td>{{ row['dest_ipv4'] }}</td>
+                    <td>{{ row['dest_port'] }}</td>
+                </tr>
+            {% endfor %}
+            <td><input type="submit" class="btn btn-success"></input></td>
+        </table>
+    </div>
+</form>
+{% endblock %}
